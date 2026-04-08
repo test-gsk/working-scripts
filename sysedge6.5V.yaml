@@ -1,0 +1,64 @@
+---
+- name: Unified SystemEDGE 6.5 Installation, Upgrade & Cleanup
+  hosts: all
+  become: yes
+  vars:
+    ansible_remote_tmp: /tmp/.ansible/tmp
+    src_file: "SystemEDGE-6.5.0-Unix-RELEASE.tar.gz"
+    dest_path: "/var"
+    new_install_root: "/opt/CA/SystemEDGE"
+    legacy_install_path: "/opt/AIOPS/apmia/SystemEDGE"
+
+  tasks:
+    - name: 1. Kill Legacy Locks
+      shell: "systemctl stop CA-SystemEDGE || systemctl stop systemedge || service sysedge stop || true"
+      changed_when: false
+
+    - name: 2. Stage and Extract Installer
+      unarchive:
+        src: "{{ src_file }}"
+        dest: "{{ dest_path }}"
+        remote_src: no
+
+    - name: 3. Execute 6.5 Installation
+      shell: |
+        SCRIPT_PATH=$(find {{ dest_path }} -name "systemedge-setup.sh" | head -n 1)
+        cd $(dirname "$SCRIPT_PATH")
+        yes | bash "./systemedge-setup.sh" install -DEULA_ACCEPTED=yes
+      register: install_result
+
+    - name: 4. Find Active Version (Ignore Backups)
+      shell: find /opt/CA -name "version" | grep -v "bkp" | head -n 1
+      register: active_version_path
+      changed_when: false
+      failed_when: active_version_path.stdout == ""
+
+    - name: 5. Verify Version is NOT 5.9
+      command: cat "{{ active_version_path.stdout }}"
+      register: final_version
+      failed_when: "'5.9' in final_version.stdout"
+      changed_when: false
+
+    # --- NEW CLEANUP TASK ---
+    - name: 6. Remove Legacy 5.9 Directory
+      file:
+        path: "{{ legacy_install_path }}"
+        state: absent
+      # Only execute if the previous task confirmed version 6.5 is healthy
+      when: "'6.5' in final_version.stdout"
+
+    - name: 7. Final Service Health Check
+      systemd:
+        name: CA-SystemEDGE
+        state: started
+        enabled: yes
+      register: service_final
+
+    - name: 8. Output Final Deployment Receipt
+      debug:
+        msg:
+          - "Status: SUCCESS"
+          - "Installed Version: {{ final_version.stdout }}"
+          - "Binary Location: {{ active_version_path.stdout }}"
+          - "Legacy Path Removed: {{ legacy_install_path }}"
+          - "Service: CA-SystemEDGE is {{ service_final.status.ActiveState }}"
