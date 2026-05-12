@@ -1,0 +1,30 @@
+---
+- name: Mitigate Dirty Frag Vul
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create modprobe configuration to blacklist vulnerable modules
+      copy:
+        dest: /etc/modprobe.d/dirtyfrag.conf
+        content: |
+          install esp4 /bin/false
+          install esp6 /bin/false
+          install rxrpc /bin/false
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Unload vulnerable modules from the running kernel
+      modprobe:
+        name: "{{ item }}"
+        state: absent
+      loop:
+        - esp4
+        - esp6
+        - rxrpc
+      ignore_errors: yes
+      register: modprobe_result
+
+    - name: Clear Page Cache
+      shell: echo 3 > /proc/sys/vm/drop_caches
+      when: modprobe_result is changed
