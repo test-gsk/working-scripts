@@ -1,0 +1,39 @@
+- name: Downgrade and Hold Docker Package
+  hosts: all
+  become: yes
+  vars:
+    pkg_name: "docker-ce-rootless-extras"
+    deb_filename: "docker-ce-rootless-extras_26.1.4-1~ubuntu.22.04~jammy_amd64.deb"
+
+  tasks:
+    - name: Copy Debian package to client nodes
+      ansible.builtin.copy:
+        src: "/tmp/{{ deb_filename }}"
+        dest: "/tmp/{{ deb_filename }}"
+        mode: '0644'
+
+    - name: Install the specific package version
+      ansible.builtin.apt:
+        deb: "/tmp/{{ deb_filename }}"
+        allow_downgrade: yes
+        state: present
+
+    - name: Hold the package version to prevent upgrades
+      ansible.builtin.dpkg_selections:
+        name: "{{ pkg_name }}"
+        selection: hold
+
+    - name: Restart Docker service
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
+        enabled: yes
+
+    - name: Verify Docker service status
+      ansible.builtin.systemd:
+        name: docker
+      register: docker_status
+
+    - name: Print Docker status
+      ansible.builtin.debug:
+        var: docker_status.status.ActiveState
