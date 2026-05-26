@@ -1,0 +1,47 @@
+---
+- name: Docker Storage Cleanup
+  hosts: all
+  become: yes
+  tasks:
+    - name: Run baseline diagnostics
+      ansible.builtin.shell: |
+        df -Th
+        umount -f /var/lib/docker/overlay2/*/merged || true
+      register: diag1
+
+    - name: Stop Docker and purge overlay files
+      ansible.builtin.shell: |
+        systemctl stop docker
+        rm -rf /var/lib/docker/overlay2/*
+        systemctl start docker
+        df -Th
+        docker ps
+      register: purge_stage
+
+    - name: Run system prune and restart
+      ansible.builtin.shell: |
+        docker system prune -a --volumes --force
+        systemctl restart docker
+        df -Th
+        docker ps
+      register: prune_stage
+
+    - name: Deploy test container and verify overlay mount
+      ansible.builtin.shell: |
+        sleep 2
+        docker run --name connection_test -d alpine tail -f /dev/null
+        df -Th | grep overlay
+        docker ps
+      register: verify_stage
+
+    - name: Display execution results
+      ansible.builtin.debug:
+        msg:
+          - "--- START DIAGNOSTICS ---"
+          - "{{ diag1.stdout }}"
+          - "--- PURGE LAYER RESULT ---"
+          - "{{ purge_stage.stdout }}"
+          - "--- PRUNE RESULT ---"
+          - "{{ prune_stage.stdout }}"
+          - "--- FINAL VERIFICATION ---"
+          - "{{ verify_stage.stdout }}"
